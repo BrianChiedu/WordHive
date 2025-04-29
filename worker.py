@@ -36,7 +36,12 @@ class WordCountWorker:
         
         # Get worker address
         try:
-            self.worker_address = socket.gethostbyname(hostname)
+            # Try to get actual network IP instead of localhost
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # This doesn't actually establish a connection, but helps get the right interface
+            s.connect((server_address, 1))  
+            self.worker_address = s.getsockname()[0]
+            s.close()
         except:
             self.worker_address = "127.0.0.1"
         
@@ -153,16 +158,26 @@ class WordCountWorker:
         while retry_count < max_retries and self.running:
             try:
                 # Send registration message
-                self.server_socket.send_json(registration)
+                self.server_socket.send_multipart([b'', json.dumps(registration).encode('utf-8')])
                 
                 # Wait for acknowledgment
                 if self.server_socket.poll(timeout=5000):  # 5 second timeout
-                    response = self.server_socket.recv_json()
-                    
-                    if response.get('type') == 'register_ack':
-                        logger.info("Registration acknowledged by server")
-                        self.status = "idle"
-                        return True
+                    try:
+                        frames = self.server_socket.recv_multipart()
+                        
+                        # Handle response based on frame structure
+                        if len(frames) >= 1:
+                            response_frame = frames[-1]  # Last frame contains the response
+                            response = json.loads(response_frame.decode('utf-8'))
+                            
+                            if response.get('type') == 'register_ack':
+                                logger.info("Registration acknowledged by server")
+                                self.status = "idle"
+                                return True
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Invalid JSON in registration response: {str(e)}")
+                    except Exception as e:
+                        logger.error(f"Error processing registration response: {str(e)}")
             
                 logger.warning(f"Registration attempt {retry_count + 1} failed, retrying...")
                 retry_count += 1
@@ -219,24 +234,35 @@ class WordCountWorker:
                 socks = dict(poller.poll(timeout=1000))  # 1 second timeout
                 
                 if self.server_socket in socks and socks[self.server_socket] == zmq.POLLIN:
-                    message = self.server_socket.recv_json()
-                    message_type = message.get('type')
+                    # Receive message frames, handle different frame structures
+                    frames = self.server_socket.recv_multipart()
                     
-                    if message_type == 'task':
-                        self._process_task(message)
-                    elif message_type == 'task_ack':
-                        logger.debug(f"Server acknowledged result for task {message.get('task_id')}")
-                    elif message_type == 'status_ack':
-                        logger.debug("Server acknowledged status update")
-                    elif message_type == 'shutdown':
-                        logger.info("Received shutdown command from server")
-                        self.running = False
+                    # Parse message - the message should be in the last frame
+                    if len(frames) > 0:
+                        try:
+                            message_data = frames[-1]  # Last frame contains the message
+                            message = json.loads(message_data.decode('utf-8'))
+                            message_type = message.get('type')
+                            
+                            if message_type == 'task':
+                                self._process_task(message)
+                            elif message_type == 'task_ack':
+                                logger.debug(f"Server acknowledged result for task {message.get('task_id')}")
+                            elif message_type == 'status_ack':
+                                logger.debug("Server acknowledged status update")
+                            elif message_type == 'shutdown':
+                                logger.info("Received shutdown command from server")
+                                self.running = False
+                        except json.JSONDecodeError as e:
+                            logger.error(f"Invalid JSON message from server: {str(e)}")
+                        except Exception as e:
+                            logger.error(f"Error processing message: {str(e)}")
                 
             except zmq.error.Again:
                 # Socket timeout, just continue
                 pass
             except Exception as e:
-                logger.error(f"Error in worker loop: {str(e)}", exc_info=True)
+                logger.error(f"Error in worker loop: {str(e)}")
                 # Brief pause to avoid tight error loop
                 time.sleep(0.1)
     
@@ -263,7 +289,7 @@ class WordCountWorker:
                 'current_task': task_id
             }
             
-            self.server_socket.send_json(status_update)
+            self.server_socket.send_multipart([b'', json.dumps(status_update).encode('utf-8')])
         except Exception as e:
             logger.warning(f"Failed to send status update: {str(e)}")
         
@@ -301,7 +327,7 @@ class WordCountWorker:
                 }
             }
             
-            self.server_socket.send_json(result_message)
+            self.server_socket.send_multipart([b'', json.dumps(result_message).encode('utf-8')])
             logger.info(f"Sent result for task {task_id}")
         except Exception as e:
             logger.error(f"Failed to send task result: {str(e)}")
@@ -319,7 +345,7 @@ class WordCountWorker:
                 'current_task': None
             }
             
-            self.server_socket.send_json(status_update)
+            self.server_socket.send_multipart([b'', json.dumps(status_update).encode('utf-8')])
         except Exception as e:
             logger.warning(f"Failed to send status update: {str(e)}")
         

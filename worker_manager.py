@@ -142,16 +142,16 @@ class WorkerManager:
             context = zmq.Context()
             socket = context.socket(zmq.REQ)
             
-            # Connect to server (client port is worker_port - 1)
-            client_port = self.worker_port - 1
-            socket.connect(f"tcp://{self.server_address}:{client_port}")
+            # Set timeout
+            socket.setsockopt(zmq.RCVTIMEO, 5000)  # 5 second timeout
             
-            # Generate a unique client ID - use system hostname
-            try:
-                hostname = socket.gethostname()
-            except:
-                hostname = "unknown-host"
-                
+            # Connect to server - client port is worker_port - 1
+            client_port = self.worker_port - 1
+            server_url = f"tcp://{self.server_address}:{client_port}"
+            logger.info(f"Connecting to server at {server_url}")
+            socket.connect(server_url)
+            
+            # Generate a unique client ID
             client_id = f"worker_manager-{os.getpid()}"
             
             # Send worker status request
@@ -160,29 +160,44 @@ class WorkerManager:
                 'client_id': client_id
             }
             
-            # Convert to JSON and send
-            message = json.dumps(request).encode('utf-8')
-            socket.send(message)
+            logger.debug(f"Sending request: {request}")
+            socket.send(json.dumps(request).encode('utf-8'))
             
-            # Wait for response with timeout
-            if socket.poll(timeout=5000):  # 5 second timeout
+            # Wait for response
+            try:
                 response_data = socket.recv()
-                response = json.loads(response_data.decode('utf-8'))
                 
-                socket.close()
-                context.term()
+                # Try to decode as JSON - if it fails, treat as plain text
+                try:
+                    response = json.loads(response_data.decode('utf-8'))
+                    
+                    # Verify response is a dictionary
+                    if not isinstance(response, dict):
+                        logger.warning(f"Response is not a dictionary: {response}")
+                        response = {"status": "error", "message": f"Invalid response format: {response}"}
+                        
+                except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                    logger.warning(f"Failed to decode JSON response: {e}")
+                    # Store raw response for debugging
+                    response = {"status": "error", "message": f"Invalid response: {response_data}"}
                 
-                return response
+            except zmq.error.Again:
+                logger.warning("Request for worker status timed out")
+                response = {"status": "error", "message": "Request timed out"}
+                
+            except Exception as e:
+                logger.error(f"Error receiving response: {e}")
+                response = {"status": "error", "message": str(e)}
             
-            socket.close()
+            # Close socket and context
+            socket.close(linger=0)
             context.term()
             
-            logger.warning("Request for worker status timed out")
-            return None
+            return response
             
         except Exception as e:
             logger.error(f"Error getting worker status from server: {str(e)}")
-            return None
+            return {"status": "error", "message": str(e)}
     
     def print_status(self):
         """Print status of worker processes."""
@@ -212,60 +227,81 @@ class WorkerManager:
         # Server-side worker status
         print("\n=== Server-side Worker Status ===")
         
-        status = self.get_worker_status_from_server()
+        status_response = self.get_worker_status_from_server()
         
-        if status and status.get('status') == 'success':
-            workers = status.get('workers', [])
+        # Make sure we have a dictionary
+        if not isinstance(status_response, dict):
+            print(f"Error: Unexpected response format: {status_response}")
+            return
+        
+        # Check response status
+        if status_response.get('status') != 'success':
+            error_msg = status_response.get('message', 'Unknown error')
+            print(f"Could not get status from server: {error_msg}")
+            return
+        
+        # Get worker information
+        workers = status_response.get('workers', [])
+        
+        if not workers:
+            print("No workers connected to server")
+        else:
+            # Create table
+            table_data = []
             
-            if not workers:
-                print("No workers connected to server")
-            else:
-                # Create table
-                table_data = []
-                
-                for worker in workers:
-                    node_id = worker.get('node_id', '')
-                    address = worker.get('address', '')
-                    status = worker.get('status', '')
+            for worker in workers:
+                # Skip if not a dictionary
+                if not isinstance(worker, dict):
+                    continue
                     
-                    # Get stats
-                    stats = worker.get('stats', {})
+                node_id = worker.get('node_id', 'unknown')
+                address = worker.get('address', 'unknown')
+                status = worker.get('status', 'unknown')
+                
+                # Get stats
+                stats = worker.get('stats', {})
+                if isinstance(stats, dict):
                     completed_tasks = stats.get('completed_tasks', 0)
                     avg_time = stats.get('avg_processing_time', 0)
-                    
-                    # Format average time
-                    avg_time_str = f"{avg_time:.2f}s" if avg_time else "N/A"
-                    
-                    # Get last heartbeat time
-                    last_heartbeat = worker.get('last_heartbeat', 0)
-                    time_since_heartbeat = time.time() - last_heartbeat
-                    
-                    table_data.append([
-                        node_id, 
-                        address, 
-                        status, 
-                        completed_tasks,
-                        avg_time_str,
-                        f"{time_since_heartbeat:.1f}s"
-                    ])
+                else:
+                    completed_tasks = 0
+                    avg_time = 0
                 
-                # Print table
-                print(tabulate(table_data, headers=[
-                    "Node ID", "Address", "Status", "Tasks", "Avg Time", "Last Heartbeat"
-                ]))
+                # Get last heartbeat time
+                last_heartbeat = worker.get('last_heartbeat', 0)
+                try:
+                    time_since_heartbeat = time.time() - float(last_heartbeat)
+                except (TypeError, ValueError):
+                    time_since_heartbeat = 0
                 
-                # Print summary
-                print(f"\nTotal workers: {status.get('worker_count', 0)}")
-                print(f"Idle workers: {status.get('idle_workers', 0)}")
-                print(f"Pending tasks: {status.get('pending_tasks', 0)}")
-                
-        else:
-            print("Could not get status from server")
+                table_data.append([
+                    node_id, 
+                    address, 
+                    status, 
+                    completed_tasks,
+                    f"{avg_time:.2f}s" if avg_time else "N/A",
+                    f"{time_since_heartbeat:.1f}s"
+                ])
+            
+            # Print table
+            print(tabulate(table_data, headers=[
+                "Node ID", "Address", "Status", "Tasks", "Avg Time", "Last Heartbeat"
+            ]))
+            
+            # Print summary
+            worker_count = status_response.get('worker_count', 0)
+            idle_workers = status_response.get('idle_workers', 0)
+            pending_tasks = status_response.get('pending_tasks', 0)
+            
+            print(f"\nTotal workers: {worker_count}")
+            print(f"Idle workers: {idle_workers}")
+            print(f"Pending tasks: {pending_tasks}")
         
         print()
 
 
-if __name__ == "__main__":
+def main():
+    """Main entry point."""
     # Parse command line arguments - simplified version
     parser = argparse.ArgumentParser(description='Distributed Word Count Worker Manager')
     
@@ -274,6 +310,7 @@ if __name__ == "__main__":
     parser.add_argument('--worker-port', type=int, default=5556, help='Server worker port')
     parser.add_argument('--heartbeat-port', type=int, default=5557, help='Server heartbeat port')
     parser.add_argument('--worker-script', default='worker.py', help='Path to worker script')
+    parser.add_argument('--debug', action='store_true', help='Enable debug logging')
     
     # Command and count
     parser.add_argument('command', nargs='?', default='status', help='Command: start, stop, status, monitor')
@@ -281,6 +318,10 @@ if __name__ == "__main__":
     parser.add_argument('--interval', type=int, default=5, help='Update interval (for monitor command)')
     
     args = parser.parse_args()
+    
+    # Set log level
+    if args.debug:
+        logging.getLogger('WorkerManager').setLevel(logging.DEBUG)
     
     # Create manager
     manager = WorkerManager(
@@ -319,3 +360,7 @@ if __name__ == "__main__":
     else:
         print(f"Unknown command: {args.command}")
         print("Valid commands: start, stop, status, monitor")
+
+
+if __name__ == "__main__":
+    main()
