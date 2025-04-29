@@ -1,0 +1,23 @@
+Using setup.py for Worker Node Deployment
+To use setup.py when setting up your friend's computer as a worker node:
+1. Copy your entire project folder to your friend's computer, including setup.py
+2. Have your friend run the setup script:  	python setup.py 
+3. The script will:
+	◦Check Python compatibility
+	◦Install all required dependencies
+	◦Create platform-appropriate startup scripts
+4. After running setup.py, your friend can start worker nodes using the generated scripts:  # On Windows
+	start_worker.bat --server YOUR_IP_ADDRESS	
+# On macOS/Linux
+	./start_worker.sh --server YOUR_IP_ADDRESS 
+Start workers on additional computers:
+
+On each worker computer, open a terminal/command prompt
+Navigate to the folder with the code
+Start workers using your laptop's IP address:
+
+On Windows:
+	worker_manager.bat start 2 --server YOUR_LAPTOP_IP
+
+On macOS/Linux:
+	./worker_manager.sh start 2 --server YOUR_LAPTOP_IP  

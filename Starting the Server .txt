@@ -1,0 +1,56 @@
+Starting the WordHive Server
+
+1. Open a terminal/command prompt on the machine that will act as your server (your laptop)
+2. Navigate to the directory containing your WordHive code:
+	cd /path/to/your/wordhive
+
+3. Start the server with the appropriate options:
+	python server.py --host 0.0.0.0 --debug
+The --host 0.0.0.0 parameter is important as it allows the server to accept connections from other computers. The --debug flag provides detailed logging that's helpful when starting out.
+
+4. Advanced options (if needed):
+Specify custom ports: --client-port 5555 --worker-port 5556 --heartbeat-port 5557
+Adjust logging level: --debug for verbose logging
+
+
+5. Verify the server is running
+Look for log messages indicating the server has started successfully:
+Server started on client port 5555, worker port 5556
+Heartbeat listener started
+Worker handler started
+Task scheduler started
+Client handler started
+
+
+Starting Local Workers
+After your server is running, you should start some worker processes (even on the same machine):
+
+Open a new terminal/command prompt (keep the server running in the first one)
+Navigate to your WordHive directory
+Start workers using worker_manager.py:
+	python worker_manager.py start 2 --server localhost
+This starts 2 worker processes on your local machine.
+
+Testing the Server
+To verify everything is running correctly:
+
+1. Check worker status:
+	python worker_manager.py status --server localhost
+This should show your connected workers.
+2. Run a simple test by processing a small file:
+	python wordhive_client.py --server localhost sample.txt
+
+Starting the Client Application
+To Start the client application:
+1. Open another terminal/command prompt window
+2. Navigate to the same folder
+3. Start the client:
+
+On Windows:
+start_client.bat --server localhost
+
+On macOS/Linux:
+./start_client.sh --server localhost
+
+The client GUI should appear
+Click the "Connect" button to connect to your local server

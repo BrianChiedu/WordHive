@@ -1,0 +1,34 @@
+Option 1: Using the Worker Manager
+The simplest way to add a worker node is to use the worker_manager.py script on the machine you want to add as a worker:
+
+1. Copy the necessary files to the new machine:
+	worker.py
+	worker_manager.py
+	Any required dependencies
+
+
+2. Install the required dependencies:
+	pip install pyzmq
+
+3. Start workers on the new machine by running:
+	python worker_manager.py start 2 --server YOUR_IP_ADDRESS
+For example, to start 2 worker processes connecting to a server at classroom.example.edu:
+python worker_manager.py start 2 --server classroom.example.edu
+
+4. Verify the workers are connected by checking the worker status:
+	python worker_manager.py status --server classroom.example.edu
+
+
+Option 2: Starting Workers Directly
+You can also start worker processes directly without using the worker manager:
+
+1. Copy worker.py to the new machine
+2. Install the required dependencies:
+	pip install pyzmq
+
+3. Start a worker process directly:
+	python worker.py --server YOUR_IP_ADDRESS
+For multiple workers, you can run the command multiple times or use a simple script:
+for i in {1..4}; do
+  python worker.py --server classroom.example.edu &
+done
