@@ -1,0 +1,4 @@
+UPPER upper Upper
+lower LOWER Lower
+MiXeD cAsE text
+This tests case sensitivity handling.
