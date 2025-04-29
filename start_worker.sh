@@ -1,0 +1,3 @@
+#!/bin/bash
+echo Starting worker node...
+python3 worker.py "$@"

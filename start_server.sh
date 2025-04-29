@@ -1,0 +1,3 @@
+#!/bin/bash
+echo Starting distributed word count server...
+python3 server.py "$@"
