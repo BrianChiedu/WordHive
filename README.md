@@ -44,6 +44,13 @@ The system consists of three main components:
 - Python 3.7 or higher
 - Required packages: `zmq`, `matplotlib`, `tkinter`, `wordcloud` (optional)
 
+## Installation
+
+Before running WordHive, make sure you have the following dependencies installed:
+
+```bash
+pip install pyzmq matplotlib wordcloud tabulate tqdm
+
 ### Installation
 
 1. Clone the repository:
